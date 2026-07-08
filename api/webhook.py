@@ -11,11 +11,10 @@ genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
-# فراخوانی آیدی گروه
-GROUP_CHAT_ID = os.environ.get("GROUP_CHAT_ID")
+# فراخوانی آیدی گروه و حذف فاصله‌های احتمالی
+GROUP_CHAT_ID = str(os.environ.get("GROUP_CHAT_ID", "")).strip()
 
 def get_best_model():
-    """یافتن هوشمند مدل برای جلوگیری از خطا"""
     models = genai.list_models()
     for m in models:
         if 'generateContent' in m.supported_generation_methods and 'gemini' in m.name:
@@ -64,6 +63,29 @@ class handler(BaseHTTPRequestHandler):
                     
                     response = model.generate_content(prompt)
                     
+                    # --- استخراج هوشمند نام رویداد برای اسم فایل ---
+                    event_name = "گزارش_رویداد" # نام پیش‌فرض در صورت پیدا نشدن
+                    for line in response.text.split('\n'):
+                        if line.strip().startswith("نام رویداد:"):
+                            extracted_name = line.split("نام رویداد:")[1].strip()
+                            # حذف براکت‌ها اگر هوش مصنوعی اشتباهاً گذاشته بود
+                            extracted_name = extracted_name.replace("[", "").replace("]", "").strip()
+                            if extracted_name:
+                                event_name = extracted_name
+                            break
+                            
+                    # پاک‌سازی کاراکترهای غیرمجاز ویندوز/تلگرام برای اسم فایل
+                    invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
+                    for char in invalid_chars:
+                        event_name = event_name.replace(char, ' ')
+                    
+                    event_name = event_name.strip()
+                    if not event_name:
+                        event_name = "گزارش_رویداد"
+                        
+                    final_file_name = f"{event_name}.docx"
+                    # -----------------------------------------------
+                    
                     new_doc = Document()
                     new_doc.add_paragraph(response.text)
                     
@@ -72,15 +94,18 @@ class handler(BaseHTTPRequestHandler):
                     output.seek(0)
                     
                     if GROUP_CHAT_ID:
-                        files = {'document': ('Report_Summary.docx', output, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
+                        # استفاده از نام استخراج شده برای فایل ارسالی
+                        files = {'document': (final_file_name, output, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
                         send_response = requests.post(f"{TELEGRAM_URL}/sendDocument", data={'chat_id': GROUP_CHAT_ID}, files=files)
                         
                         if send_response.status_code == 200:
-                            requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": "✅ گزارش با موفقیت به گروه ارسال شد."})
+                            requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": f"✅ گزارش با موفقیت به گروه ارسال شد.\nنام فایل ثبت شده: {final_file_name}"})
                         else:
                             error_desc = send_response.json().get('description', 'دلیل نامشخص')
                             requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": f"⚠️ خطا در ارسال به گروه: {error_desc}"})
-                    
+                    else:
+                        requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ متغیر GROUP_CHAT_ID در تنظیمات ورسل خالی است!"})
+                        
                 except Exception as e:
                     requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": f"خطا در پردازش: {str(e)}"})
             
