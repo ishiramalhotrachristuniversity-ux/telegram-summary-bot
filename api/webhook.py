@@ -6,13 +6,11 @@ import google.generativeai as genai
 from io import BytesIO
 from docx import Document
 
-# تنظیمات کلاینت جمینای
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
 def get_best_model():
-    """یافتن هوشمند مدل برای جلوگیری از خطای 404"""
     models = genai.list_models()
     for m in models:
         if 'generateContent' in m.supported_generation_methods and 'gemini' in m.name:
@@ -30,10 +28,7 @@ class handler(BaseHTTPRequestHandler):
             document = update['message']['document']
             
             if document.get('file_name', '').endswith('.docx'):
-                self.send_telegram_message(chat_id, "در حال بازنویسی با قلم شیوا عاشوری... ✍️")
-                
                 try:
-                    # دانلود و استخراج متن
                     file_id = document['file_id']
                     file_info = requests.get(f"{TELEGRAM_URL}/getFile?file_id={file_id}").json()
                     file_path = file_info['result']['file_path']
@@ -43,44 +38,33 @@ class handler(BaseHTTPRequestHandler):
                     doc = Document(BytesIO(file_content))
                     text = '\n'.join([para.text for para in doc.paragraphs if para.text.strip()])
                     
-                    # تحلیل با قلم شیوا
                     model = get_best_model()
+                    
+                    # اصلاح پرامپت برای حفظ لحن روایی متن اصلی و حذف نام اشخاص
                     prompt = (
-                        "شما دستیار ارشدِ شیوا عاشوری هستید. گزارش زیر را تحلیل کرده و در قالب فایل ورد بازنویسی کنید.\n"
-                        "لحن و قلم شما باید دقیقاً مطابق با سبک رواییِ شیوا باشد: توصیفی، شاعرانه، عمیق، و جامعه‌نگر.\n"
-                        "از ترکیباتِ استعاری استفاده کنید، به احساساتِ انسانی در رویدادها بها بدهید و فضا را همانند یک تابلو نقاشیِ کلامی تصویر کنید.\n\n"
-                        "ساختار گزارش ورد باید شامل موارد زیر باشد:\n"
-                        "۱. شناسنامه رویداد (عنوان، مکان، تنظیم‌کننده)\n"
-                        "۲. خلاصه مدیریتی (با قلمِ رواییِ شیوا - توصیفی و عمیق)\n"
-                        "۳. ارزش محوری (تحلیلی و بنیادین)\n"
-                        "۴. اقدام (خروجیِ کلیدی)\n\n"
-                        f"متن اصلی گزارش:\n{text}"
+                        "گزارش زیر را تحلیل کن و یک خلاصه در قالب فایل ورد با فرمت زیر ارائه بده. "
+                        "مهم: در تمام بخش‌ها، لحن روایی، شاعرانه و توصیفیِ خودِ گزارش را حفظ کن اما نام هیچ شخصی را ذکر نکن:\n\n"
+                        "نام رویداد: [عنوان دقیق رویداد]\n"
+                        "خلاصه رویداد: [یک پاراگرافِ فشرده که با همان لحنِ ادبی و توصیفیِ متن اصلی، جزئیاتِ کلیدی را روایت کند]\n"
+                        "ارزش محوری: [جمله‌ای با همان لحن درباره ارزشِ عمیق و نهفته در این رویداد]\n\n"
+                        f"متن گزارش:\n{text}"
                     )
                     
                     response = model.generate_content(prompt)
                     
-                    # ایجاد فایل ورد
                     new_doc = Document()
-                    new_doc.add_heading('گزارش تحلیلی با قلم شیوا', 0)
                     new_doc.add_paragraph(response.text)
                     
                     output = BytesIO()
                     new_doc.save(output)
                     output.seek(0)
                     
-                    # ارسال فایل به تلگرام
-                    files = {'document': ('Report_ShivaStyle.docx', output, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
+                    files = {'document': ('Report_Summary.docx', output, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
                     requests.post(f"{TELEGRAM_URL}/sendDocument", data={'chat_id': chat_id}, files=files)
                     
                 except Exception as e:
-                    self.send_telegram_message(chat_id, f"❌ خطا در پردازش: {str(e)}")
+                    requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": f"خطا: {str(e)}"})
             
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
-
-    def send_telegram_message(self, chat_id, text):
-        try:
-            requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": text})
-        except Exception:
-            pass
