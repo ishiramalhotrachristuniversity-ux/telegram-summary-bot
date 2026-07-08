@@ -17,7 +17,7 @@ def get_best_model():
     for m in models:
         if 'generateContent' in m.supported_generation_methods and 'gemini' in m.name:
             return genai.GenerativeModel(m.name)
-    return genai.GenerativeModel('gemini-pro') # بازگشت به مدل پیش‌فرض در صورت عدم یافتن
+    return genai.GenerativeModel('gemini-pro')
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -44,15 +44,12 @@ class handler(BaseHTTPRequestHandler):
                     doc = Document(BytesIO(file_content))
                     text = '\n'.join([para.text for para in doc.paragraphs if para.text.strip()])
                     
-                    # انتخاب و اجرای مدل
+                    # انتخاب و اجرای مدل با پرامپت اصلاح شده
                     model = get_best_model()
                     prompt = (
-                        "شما یک دستیار ارشد هستید. یک خلاصه مدیریتی از گزارش زیر تهیه کنید "
-                        "که شامل این سه بخش باشد:\n"
-                        "۱. هدف اصلی گزارش\n"
-                        "۲. نکات کلیدی و یافته‌ها\n"
-                        "۳. اقدامات بعدی (Action Items)\n"
-                        "لحن پاسخ کاملاً رسمی و حرفه‌ای باشد.\n\n"
+                        "تحلیل زیر را دقیقاً در دو بخش ارائه کن:\n\n"
+                        "خلاصه: [یک پاراگراف حداکثر ۴ خطی که نکات کلیدیِ گزارش را بیان کند]\n"
+                        "ارزش محوری: [در یک جمله کوتاه بنویس این گزارش چه ارزش یا هدف اصلی‌ای را بولد کرده است]\n\n"
                         f"متن گزارش:\n{text}"
                     )
                     
