@@ -6,11 +6,16 @@ import google.generativeai as genai
 from io import BytesIO
 from docx import Document
 
+# تنظیمات کلاینت جمینای
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
+# فراخوانی آیدی گروه از تنظیمات ورسل
+GROUP_CHAT_ID = os.environ.get("GROUP_CHAT_ID")
+
 def get_best_model():
+    """یافتن هوشمند مدل در دسترس برای جلوگیری از خطای 404"""
     models = genai.list_models()
     for m in models:
         if 'generateContent' in m.supported_generation_methods and 'gemini' in m.name:
@@ -40,7 +45,7 @@ class handler(BaseHTTPRequestHandler):
                     
                     model = get_best_model()
                     
-                    # پرامپت اصلاح‌شده برای استخراج دقیق ساختار
+                    # پرامپت اصلاح‌شده برای استخراج دقیق ساختار طبق گفتگو
                     prompt = (
                         "گزارش زیر را در قالب یک فایل ورد با فرمت دقیق زیر خلاصه کن.\n\n"
                         "قوانین اجباری:\n"
@@ -59,34 +64,24 @@ class handler(BaseHTTPRequestHandler):
                     )
                     
                     response = model.generate_content(prompt)
-                    response_text = response.text
-                    
-                    # استخراج نام رویداد از پاسخ برای نام‌گذاری فایل
-                    file_name = "خلاصه_رویداد.docx"
-                    for line in response_text.split('\n'):
-                        if "نام رویداد:" in line:
-                            extracted_name = line.replace("نام رویداد:", "").strip()
-                            if extracted_name:
-                                # حذف کاراکترهای غیرمجاز برای نام فایل در سیستم عامل
-                                invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
-                                for char in invalid_chars:
-                                    extracted_name = extracted_name.replace(char, '')
-                                file_name = f"{extracted_name}.docx"
-                            break
                     
                     new_doc = Document()
-                    new_doc.add_paragraph(response_text)
+                    new_doc.add_paragraph(response.text)
                     
                     output = BytesIO()
                     new_doc.save(output)
                     output.seek(0)
                     
-                    # ارسال فایل با نام اختصاصی رویداد
-                    files = {'document': (file_name, output, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
-                    requests.post(f"{TELEGRAM_URL}/sendDocument", data={'chat_id': chat_id}, files=files)
+                    # ۱. ارسال فایل نهایی به گروه هدف
+                    if GROUP_CHAT_ID:
+                        files = {'document': ('Report_Summary.docx', output, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
+                        requests.post(f"{TELEGRAM_URL}/sendDocument", data={'chat_id': GROUP_CHAT_ID}, files=files)
+                    
+                    # ۲. ارسال پیام تایید به پی‌وی شما
+                    requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": "✅ گزارش ارسال شد."})
                     
                 except Exception as e:
-                    requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": f"خطا: {str(e)}"})
+                    requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": f"خطا در پردازش: {str(e)}"})
             
         self.send_response(200)
         self.end_headers()
