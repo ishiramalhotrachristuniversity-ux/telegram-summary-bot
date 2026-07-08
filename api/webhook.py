@@ -6,7 +6,6 @@ import google.generativeai as genai
 from io import BytesIO
 from docx import Document
 
-# تنظیمات کلاینت جمینای
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
@@ -15,7 +14,6 @@ TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 GROUP_CHAT_ID = os.environ.get("GROUP_CHAT_ID")
 
 def get_best_model():
-    """یافتن هوشمند مدل در دسترس برای جلوگیری از خطای 404"""
     models = genai.list_models()
     for m in models:
         if 'generateContent' in m.supported_generation_methods and 'gemini' in m.name:
@@ -45,7 +43,6 @@ class handler(BaseHTTPRequestHandler):
                     
                     model = get_best_model()
                     
-                    # پرامپت اصلاح‌شده برای استخراج دقیق ساختار طبق گفتگو
                     prompt = (
                         "گزارش زیر را در قالب یک فایل ورد با فرمت دقیق زیر خلاصه کن.\n\n"
                         "قوانین اجباری:\n"
@@ -72,13 +69,24 @@ class handler(BaseHTTPRequestHandler):
                     new_doc.save(output)
                     output.seek(0)
                     
-                    # ۱. ارسال فایل نهایی به گروه هدف
+                    # بررسی وجود آیدی گروه در ورسل
                     if GROUP_CHAT_ID:
                         files = {'document': ('Report_Summary.docx', output, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
-                        requests.post(f"{TELEGRAM_URL}/sendDocument", data={'chat_id': GROUP_CHAT_ID}, files=files)
-                    
-                    # ۲. ارسال پیام تایید به پی‌وی شما
-                    requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": "✅ گزارش ارسال شد."})
+                        # ارسال به گروه
+                        send_response = requests.post(f"{TELEGRAM_URL}/sendDocument", data={'chat_id': GROUP_CHAT_ID}, files=files)
+                        
+                        # اگر ارسال به گروه موفق بود
+                        if send_response.status_code == 200:
+                            requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": "✅ گزارش با موفقیت به گروه ارسال شد."})
+                        # اگر تلگرام خطا داد
+                        else:
+                            error_desc = send_response.json().get('description', 'دلیل نامشخص')
+                            requests.post(f"{TELEGRAM_URL}/sendMessage", json={
+                                "chat_id": chat_id, 
+                                "text": f"⚠️ فایل آماده شد اما تلگرام اجازه ارسال به گروه را نداد!\nدلیل: {error_desc}\nآیدی چک شده: {GROUP_CHAT_ID}"
+                            })
+                    else:
+                        requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": "⚠️ متغیر GROUP_CHAT_ID در تنظیمات ورسل خالی است یا خوانده نشده است!"})
                     
                 except Exception as e:
                     requests.post(f"{TELEGRAM_URL}/sendMessage", json={"chat_id": chat_id, "text": f"خطا در پردازش: {str(e)}"})
