@@ -39,33 +39,50 @@ class handler(BaseHTTPRequestHandler):
                     text = '\n'.join([para.text for para in doc.paragraphs if para.text.strip()])
                     
                     model = get_best_model()
-                    # قوانین اصلاح شده: فقط محدودیت خط و حفظ لحن روایی
-        prompt = (
-    "گزارش زیر را در قالب یک فایل ورد با فرمت زیر خلاصه کن.\n\n"
-    "قوانین اجباری:\n"
-    "1. اگر تاریخ رویداد در متن وجود داشت، همان را استخراج کن.\n"
-    "2. کل بخش «خلاصه رویداد» باید بین 5 تا 7 خط باشد.\n"
-    "3. لحن روایی گزارش حفظ شود.\n"
-    "4. چیزی از خودت اضافه نکن و فقط از اطلاعات موجود در متن استفاده کن.\n\n"
-    "فرمت خروجی:\n\n"
-    "نام رویداد: [عنوان]\n"
-    "تاریخ رویداد: [تاریخ]\n"
-    "خلاصه رویداد:\n"
-    "[خلاصه‌ای توصیفی و روایی در 5 تا 7 خط]\n\n"
-    "ارزش محوری: [یک جمله کوتاه]\n\n"
-    f"متن گزارش:\n{text}"
-)
+                    
+                    # پرامپت اصلاح‌شده برای استخراج دقیق ساختار
+                    prompt = (
+                        "گزارش زیر را در قالب یک فایل ورد با فرمت دقیق زیر خلاصه کن.\n\n"
+                        "قوانین اجباری:\n"
+                        "1. نام رویداد را دقیقاً از متن استخراج کن.\n"
+                        "2. اگر تاریخ رویداد در متن وجود داشت، همان را دقیقاً استخراج کن و روبروی بخش تاریخ رویداد بنویس.\n"
+                        "3. کل بخش «خلاصه رویداد» باید بین 5 تا 7 خط باشد.\n"
+                        "4. لحن روایی گزارش حفظ شود.\n"
+                        "5. چیزی از خودت اضافه نکن و فقط از اطلاعات موجود در متن استفاده کن.\n\n"
+                        "فرمت خروجی (دقیقاً به همین شکل شروع شود):\n"
+                        "نام رویداد: [عنوان دقیق رویداد]\n"
+                        "تاریخ رویداد: [تاریخ رویداد یا عبارت ذکر نشده]\n"
+                        "خلاصه رویداد:\n"
+                        "[خلاصه‌ای توصیفی و روایی در 5 تا 7 خط]\n\n"
+                        "ارزش محوری: [یک جمله کوتاه]\n\n"
+                        f"متن گزارش:\n{text}"
+                    )
                     
                     response = model.generate_content(prompt)
+                    response_text = response.text
+                    
+                    # استخراج نام رویداد از پاسخ برای نام‌گذاری فایل
+                    file_name = "خلاصه_رویداد.docx"
+                    for line in response_text.split('\n'):
+                        if "نام رویداد:" in line:
+                            extracted_name = line.replace("نام رویداد:", "").strip()
+                            if extracted_name:
+                                # حذف کاراکترهای غیرمجاز برای نام فایل در سیستم عامل
+                                invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
+                                for char in invalid_chars:
+                                    extracted_name = extracted_name.replace(char, '')
+                                file_name = f"{extracted_name}.docx"
+                            break
                     
                     new_doc = Document()
-                    new_doc.add_paragraph(response.text)
+                    new_doc.add_paragraph(response_text)
                     
                     output = BytesIO()
                     new_doc.save(output)
                     output.seek(0)
                     
-                    files = {'document': ('Report_Summary.docx', output, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
+                    # ارسال فایل با نام اختصاصی رویداد
+                    files = {'document': (file_name, output, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')}
                     requests.post(f"{TELEGRAM_URL}/sendDocument", data={'chat_id': chat_id}, files=files)
                     
                 except Exception as e:
